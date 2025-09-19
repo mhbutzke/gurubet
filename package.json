@@ -1,0 +1,22 @@
+{
+  "name": "gurubet",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:connection": "node scripts/testConnection.js",
+    "inspect:fixtures": "node scripts/inspectFixtures.js",
+    "seed:fixtures": "node scripts/seedFixtures.js",
+    "inspect:endpoint": "node scripts/inspectEndpoint.js",
+    "seed:all": "node scripts/seedAll.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "dotenv": "^17.2.2"
+  }
+}
