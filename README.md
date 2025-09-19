@@ -29,6 +29,7 @@ Ingests football data from the Sportmonks API (v3) and persists it to a Supabase
 - `npm run inspect:fixtures` – convenience wrapper to review the fixtures payload.
 - `npm run seed:fixtures` – upserts a sample of fixtures (20 by default).
 - `npm run seed:all` – orchestrates ingestion for every configured entity. Use `--only` to target specific tables (e.g. `npm run seed:all -- --only fixtures`).
+- `npm run seed:fixture-details` – downloads events and statistics for fixtures in batches. Supports options such as `--limit`, `--start-after`, `--batch-size`, `--page-size`, `--skip-events`, and `--skip-stats`.
 
 Each seeding step uses `upsert` to keep data idempotent and respects the API pagination rules (including `filters=populate`) plus Sportmonks rate limiting headers.
 
@@ -39,6 +40,7 @@ Each seeding step uses `upsert` to keep data idempotent and respects the API pag
 - `0002_create_core_entities.sql` – continents, countries, regions, cities, core types.
 - `0003_create_football_entities.sql` – leagues, teams, seasons, etc.
 - `0004_alter_fixtures_nullable.sql` – relaxes not-null constraints to match API payloads.
+- `0005_create_fixture_details.sql` – schema for `fixture_events` and `fixture_statistics`.
 
 Apply the migrations in order using Supabase SQL editor or `psql`:
 ```bash

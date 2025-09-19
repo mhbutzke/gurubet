@@ -25,6 +25,23 @@ function clampNumber(value, fallback) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function maybePauseForRateLimit(rateLimit, path) {
+  if (!rateLimit) return;
+  const remaining = Number(rateLimit.remaining);
+  if (!Number.isFinite(remaining) || remaining > RATE_THRESHOLD) return;
+
+  let waitFor = RATE_WAIT_MS;
+  if (Number.isFinite(Number(rateLimit.resets_in_seconds)) && remaining > 0) {
+    const averageSpacing = Math.ceil((Number(rateLimit.resets_in_seconds) * 1000) / remaining);
+    waitFor = Math.max(waitFor, averageSpacing);
+  }
+  console.log(
+    `Rate limit nearing for ${path} (entity: ${rateLimit.requested_entity}, remaining: ${remaining}). ` +
+      `Pausing for ${waitFor}ms.`,
+  );
+  await sleep(waitFor);
+}
+
 function ensureToken() {
   const token = process.env.SPORTMONKS_API_KEY;
   if (!token) {
@@ -127,22 +144,7 @@ async function fetchEntities(path, options = {}) {
       });
     }
 
-    const rateLimit = payload.rate_limit ?? null;
-    if (rateLimit) {
-      const remaining = Number(rateLimit.remaining);
-      if (Number.isFinite(remaining) && remaining <= RATE_THRESHOLD) {
-        let waitFor = RATE_WAIT_MS;
-        if (Number.isFinite(Number(rateLimit.resets_in_seconds)) && remaining > 0) {
-          const averageSpacing = Math.ceil((Number(rateLimit.resets_in_seconds) * 1000) / remaining);
-          waitFor = Math.max(waitFor, averageSpacing);
-        }
-        console.log(
-          `Rate limit nearing for ${path} (entity: ${rateLimit.requested_entity}, remaining: ${remaining}). ` +
-            `Pausing for ${waitFor}ms.`,
-        );
-        await sleep(waitFor);
-      }
-    }
+    await maybePauseForRateLimit(payload.rate_limit ?? null, path);
 
     if (!hasMore || !pagination.next_page) {
       break;
@@ -154,6 +156,39 @@ async function fetchEntities(path, options = {}) {
   return results;
 }
 
+async function fetchFixtureDetails(ids, options = {}) {
+  if (!Array.isArray(ids) || !ids.length) {
+    return [];
+  }
+
+  const token = ensureToken();
+  const include = normaliseParam(options.include ?? options.includes ?? ['events', 'statistics'], ';');
+  const select = normaliseParam(options.select, ',');
+  const filtersParam = normaliseParam(options.filters, ';');
+  const additionalParams = options.query ?? options.params ?? {};
+
+  const baseParams = { api_token: token };
+  if (include) baseParams.include = include;
+  if (select) baseParams.select = select;
+  if (filtersParam) baseParams.filters = filtersParam;
+
+  const requestUrl = new URL(`${BASE_URL}/football/fixtures/multi/${ids.join(',')}`);
+  applyQueryParams(requestUrl, baseParams);
+  applyQueryParams(requestUrl, additionalParams);
+
+  const response = await fetch(requestUrl);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Sportmonks request failed (${response.status}): ${body}`);
+  }
+
+  const payload = await response.json();
+  await maybePauseForRateLimit(payload.rate_limit ?? null, 'football/fixtures/multi');
+
+  return payload.data ?? [];
+}
+
 module.exports = {
   fetchEntities,
+  fetchFixtureDetails,
 };

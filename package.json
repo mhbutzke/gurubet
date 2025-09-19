@@ -9,7 +9,8 @@
     "inspect:fixtures": "node scripts/inspectFixtures.js",
     "seed:fixtures": "node scripts/seedFixtures.js",
     "inspect:endpoint": "node scripts/inspectEndpoint.js",
-    "seed:all": "node scripts/seedAll.js"
+    "seed:all": "node scripts/seedAll.js",
+    "seed:fixture-details": "node scripts/seedFixtureDetails.js"
   },
   "keywords": [],
   "author": "",
