@@ -1,0 +1,60 @@
+# PRD: Fortalecer pipeline de ingestão e cron jobs (GURUBET)
+
+## Objetivo
+Tornar o pipeline de ingestão e enriquecimento de fixtures mais robusto, eficiente e seguro, reduzindo latência de dados, evitando concorrência, acelerando backfill histórico e melhorando observabilidade.
+
+## Contexto Atual
+- Jobs ativos:
+  - fixture_delta_job (hora em hora): atualiza `fixtures`, `fixture_events`, `fixture_statistics`.
+  - fixture_enrichment_daily (08:00 e 20:00): enriquece dados derivados (participants, scores, periods, lineups, lineup_details, odds, weather).
+  - fixture_enrichment_backfill (a cada 3 min): backfill de enriquecimentos.
+- Tabelas principais: `fixtures`, `fixture_events`, `fixture_statistics`, `fixture_participants`, `fixture_scores`, `fixture_periods`, `fixture_lineups`, `fixture_lineup_details`, `fixture_odds`, `fixture_weather`.
+- Problemas atuais:
+  - Ausência de lock → risco de concorrência e sobrecarga.
+  - Backfill orientado por janela temporal em vez de lacunas reais.
+  - `targets` aceito no payload mas ignorado na função de enrichment.
+  - Frequências podem gerar latência (delta 60 min) e custo elevado (backfill agressivo).
+  - Tokens em cron precisam de segurança via `current_setting`/Vault.
+  - Observabilidade limitada e falta de retry/backoff robusto.
+
+## Escopo
+1) Implementar locks (advisory lock) em `fixture-delta` e `fixture-enrichment`.
+2) Redesenhar backfill para priorizar lacunas (fixtures sem enriquecimento), ordenando por `starting_at asc` e com cursor próprio.
+3) Implementar suporte real a `targets` no `fixture-enrichment` (controla includes e upserts por alvo).
+4) Ajustar a malha de crons:
+   - delta padrão: a cada 15 min.
+   - delta live (opcional): a cada 3–5 min para hoje/amanhã com limites menores.
+   - enrichment daily: manter 08:00/20:00.
+   - enrichment hourly leve: a cada hora com limites moderados.
+   - backfill: a cada 3–5 min, baseado em lacunas e `targets` estritos, com cursor.
+5) Segurança de segredos em cron (usar `current_setting('app.settings.service_role_key')` ou Secrets) e remover tokens inline.
+6) Retry/backoff e métricas adicionais (HTTP status, contagens por alvo) nos logs em `ingestion_runs.details`.
+7) Testes e validação fim a fim + consultas de verificação.
+
+## Não Escopo
+- Alterações de modelo fora das tabelas citadas.
+- Reprocessamento integral do histórico.
+
+## Requisitos Funcionais
+- RF1: Em execução concorrente, a função deve abortar de forma idempotente, logando noop.
+- RF2: Backfill deve progredir estável no histórico, reduzindo lacunas verificáveis.
+- RF3: `targets` deve reduzir chamadas à API e escrituras desnecessárias.
+- RF4: Crons refletem novas frequências e segurança de segredos.
+- RF5: Logs permitem auditoria e troubleshooting.
+
+## Requisitos Não Funcionais
+- Minimizar consumo de API (rate limit friendly).
+- Idempotência e consistência dos upserts.
+- Observabilidade: logs, métricas e sumários claros.
+
+## Entregáveis
+- Edits nas Edge Functions `supabase/functions/fixture-delta/index.ts` e `supabase/functions/fixture-enrichment/index.ts` para locks, targets, backoff e métricas.
+- SQLs de cron atualizados em `sql/` e/ou `supabase/migrations/` usando `current_setting`.
+- Scripts/consultas de validação em `scripts/` e `docs/`.
+
+## Critérios de Aceite
+- Sem concorrência dupla observada.
+- Backfill reduz lacunas (consultas indicam queda de fixtures faltantes).
+- `targets` efetivo (logs mostram redução quando filtrado).
+- Crons executam nas novas frequências e sem tokens inline.
+- Relatórios trazem métricas por alvo e HTTP status por execução.

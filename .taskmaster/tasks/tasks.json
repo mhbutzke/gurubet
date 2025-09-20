@@ -1,0 +1,86 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "EPIC: Fortalecer pipeline de ingestão e cron jobs",
+        "description": "Implementar locks, backfill por lacunas, suporte a targets no enrichment, ajustes de cron e segurança, além de observabilidade e retries.",
+        "details": "",
+        "testStrategy": "Testes concorrentes, simulações de backfill com lacunas, chamadas com targets e verificação de crons, além de checagens de métricas/logs em ingestion_runs.",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Adicionar advisory locks nas Edge Functions",
+            "description": "Usar pg_try_advisory_lock/pg_advisory_unlock (via RPC ou queries) e abortar execução se já houver lock.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 2,
+            "title": "Backfill por lacunas: selecionar fixtures sem enriquecimento",
+            "description": "Selecionar fixtures que estejam sem participants/scores/periods/lineups/detalhes/odds/weather, ordenadas por starting_at asc, com limit e cursor.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 3,
+            "title": "Suporte real a targets no enrichment",
+            "description": "Respeitar payload.targets para controlar includes na chamada Sportmonks e upserts por tabela.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 4,
+            "title": "Ajustar malha de cron jobs e segurança de tokens",
+            "description": "Atualizar schedules (delta 15min, optional delta_live 3–5min, enrichment daily 08/20h, enrichment hourly leve, backfill 3–5min) e usar current_setting para Authorization.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 5,
+            "title": "Retry/backoff e métricas detalhadas nos logs",
+            "description": "Adicionar retries com backoff exponencial para HTTP, e salvar em ingestion_runs.details métricas por alvo e HTTP status.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 6,
+            "title": "Consultas e scripts de validação",
+            "description": "Criar queries e scripts para medir lacunas, progresso do backfill, e frescor dos dados; documentar em docs/.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 7,
+            "title": "Documentação e rollout",
+            "description": "Atualizar README e docs com nova malha de crons, variáveis, operações de backfill e alvos; plano de rollout e monitoramento.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "created": "2025-09-20T22:26:53.866Z",
+      "description": "Default tasks context",
+      "updated": "2025-09-20T23:36:12.671Z"
+    }
+  }
+}

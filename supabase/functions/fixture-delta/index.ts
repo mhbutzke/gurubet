@@ -28,6 +28,8 @@ const DAYS_BACK = Number(Deno.env.get("FIXTURE_DELTA_DAYS_BACK") ?? 1);
 const DAYS_FORWARD = Number(Deno.env.get("FIXTURE_DELTA_DAYS_FORWARD") ?? 0);
 const RATE_THRESHOLD = Number(Deno.env.get("SPORTMONKS_RATE_THRESHOLD") ?? 50);
 const RATE_WAIT_MS = Number(Deno.env.get("SPORTMONKS_RATE_WAIT_MS") ?? 1000);
+const MAX_RETRIES = Number(Deno.env.get("SPORTMONKS_MAX_RETRIES") ?? 3);
+const RETRY_BASE_MS = Number(Deno.env.get("SPORTMONKS_RETRY_BASE_MS") ?? 500);
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -55,15 +57,32 @@ async function maybePause(rateLimit: RateLimitInfo | null, context: string) {
   await delay(waitMs);
 }
 
-async function fetchSportmonks(url: URL) {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Sportmonks request failed (${response.status}): ${text}`);
+async function fetchSportmonks(url: URL, metrics?: { http: Array<Record<string, unknown>> }) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const startedAt = Date.now();
+    let status = 0;
+    try {
+      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      status = response.status;
+      if (!response.ok) {
+        const text = await response.text();
+        if ((status === 429 || status >= 500) && attempt < MAX_RETRIES) {
+          const backoff = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+          await delay(backoff);
+          continue;
+        }
+        throw new Error(`Sportmonks request failed (${status}): ${text}`);
+      }
+      const payload = await response.json();
+      const rateLimit = payload?.rate_limit ?? null;
+      return { payload, rateLimit, status };
+    } finally {
+      if (metrics && Array.isArray(metrics.http)) {
+        metrics.http.push({ path: url.pathname, status, ms: Date.now() - startedAt, attempt });
+      }
+    }
   }
-  const payload = await response.json();
-  const rateLimit = payload?.rate_limit ?? null;
-  return { payload, rateLimit };
+  throw new Error("Exhausted retries for Sportmonks request");
 }
 
 function toNumber(value: unknown) {
@@ -232,7 +251,7 @@ async function getIngestionState(entity: string) {
   };
 }
 
-async function collectFixtures(startAfter: number, limit: number) {
+async function collectFixtures(startAfter: number, limit: number, metrics?: { http: Array<Record<string, unknown>> }) {
   const fixtures: any[] = [];
   let cursor = startAfter;
   let page = 1;
@@ -244,7 +263,7 @@ async function collectFixtures(startAfter: number, limit: number) {
     url.searchParams.set("per_page", String(Math.min(PER_PAGE, limit - fixtures.length)));
     url.searchParams.set("page", String(page));
 
-    const { payload, rateLimit } = await fetchSportmonks(url);
+    const { payload, rateLimit } = await fetchSportmonks(url, metrics);
     await maybePause(rateLimit, "fixtures");
 
     const batch = payload?.data ?? [];
@@ -265,7 +284,7 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-async function collectFixturesBetween(fromDate: string, toDate: string) {
+async function collectFixturesBetween(fromDate: string, toDate: string, metrics?: { http: Array<Record<string, unknown>> }) {
   const fixtures: any[] = [];
   let page = 1;
 
@@ -275,7 +294,7 @@ async function collectFixturesBetween(fromDate: string, toDate: string) {
     url.searchParams.set("per_page", String(PER_PAGE));
     url.searchParams.set("page", String(page));
 
-    const { payload, rateLimit } = await fetchSportmonks(url);
+    const { payload, rateLimit } = await fetchSportmonks(url, metrics);
     await maybePause(rateLimit, "fixtures/between");
 
     const batch = payload?.data ?? [];
@@ -290,7 +309,7 @@ async function collectFixturesBetween(fromDate: string, toDate: string) {
   return fixtures;
 }
 
-async function fetchDetailsForFixtures(ids: number[]) {
+async function fetchDetailsForFixtures(ids: number[], metrics?: { http: Array<Record<string, unknown>> }) {
   const runTimestamp = new Date().toISOString();
   const eventRows: any[] = [];
   const statRows: any[] = [];
@@ -303,7 +322,7 @@ async function fetchDetailsForFixtures(ids: number[]) {
     url.searchParams.set("api_token", SPORTMONKS_API_KEY);
     url.searchParams.set("include", "events;statistics.type");
 
-    const { payload, rateLimit } = await fetchSportmonks(url);
+    const { payload, rateLimit } = await fetchSportmonks(url, metrics);
     await maybePause(rateLimit, "fixtures/multi");
 
     const fixtures = payload?.data ?? [];
@@ -326,7 +345,28 @@ async function fetchDetailsForFixtures(ids: number[]) {
 
 serve(async (request) => {
   const startedAt = new Date().toISOString();
+  const LOCK_NAME = "edge:fixture-delta";
+  let acquiredLock = false;
   try {
+    const metrics: { http: Array<Record<string, unknown>> } = { http: [] };
+    const { data: gotLock, error: lockError } = await supabase.rpc("try_advisory_lock", { lock_name: LOCK_NAME });
+    if (lockError) {
+      console.error("Lock error:", lockError.message);
+      await insertRunLog("fixtures", "noop", startedAt, 0, undefined, { reason: "lock_error" });
+      return new Response(JSON.stringify({ message: "Lock error - aborting" }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    if (!gotLock) {
+      await insertRunLog("fixtures", "noop", startedAt, 0, undefined, { reason: "concurrent_lock" });
+      return new Response(JSON.stringify({ message: "Already running - noop" }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+    acquiredLock = true;
+
     const payload = await request.json().catch(() => ({}));
     const explicitStart = typeof payload.startAfter === "number" ? payload.startAfter : null;
     const limit = typeof payload.limit === "number" ? payload.limit : DEFAULT_LIMIT;
@@ -336,7 +376,7 @@ serve(async (request) => {
 
     const state = await getIngestionState("fixtures");
     const startAfter = explicitStart ?? state.lastId ?? 0;
-    const { fixtures: newFixtures, lastId } = await collectFixtures(startAfter, limit);
+    const { fixtures: newFixtures, lastId } = await collectFixtures(startAfter, limit, metrics);
 
     const fixtureMap = new Map<number, any>();
     newFixtures.forEach((fixture) => fixtureMap.set(fixture.id, fixture));
@@ -366,7 +406,7 @@ serve(async (request) => {
         toDate = formatDate(to);
       }
 
-      rangeFixtures = await collectFixturesBetween(fromDate, toDate);
+      rangeFixtures = await collectFixturesBetween(fromDate, toDate, metrics);
       rangeFixtures.forEach((fixture) => fixtureMap.set(fixture.id, fixture));
     }
 
@@ -389,7 +429,7 @@ serve(async (request) => {
     await chunkedUpsert("fixtures", mappedFixtures);
 
     const fixtureIds = fixtures.map((f) => f.id);
-    const { eventRows, statRows } = await fetchDetailsForFixtures(fixtureIds);
+    const { eventRows, statRows } = await fetchDetailsForFixtures(fixtureIds, metrics);
 
     if (eventRows.length) {
       await chunkedUpsert("fixture_events", eventRows);
@@ -421,6 +461,7 @@ serve(async (request) => {
       lastId: newLastId,
       daysBack,
       daysForward,
+      http: metrics.http,
     });
 
     return new Response(
@@ -440,5 +481,14 @@ serve(async (request) => {
       headers: { "Content-Type": "application/json" },
       status: 500,
     });
+  } finally {
+    if (acquiredLock) {
+      try {
+        await supabase.rpc("advisory_unlock", { lock_name: LOCK_NAME });
+      } catch (e) {
+        const msg = e && typeof e === "object" && "message" in e ? (e as any).message : String(e);
+        console.error("Unlock error:", msg);
+      }
+    }
   }
 });

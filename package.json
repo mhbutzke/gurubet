@@ -10,7 +10,9 @@
     "seed:fixtures": "node scripts/seedFixtures.js",
     "inspect:endpoint": "node scripts/inspectEndpoint.js",
     "seed:all": "node scripts/seedAll.js",
-    "seed:fixture-details": "node scripts/seedFixtureDetails.js"
+    "seed:fixture-details": "node scripts/seedFixtureDetails.js",
+    "monitor": "node scripts/monitorPipeline.js",
+    "backfill:enrichment": "node scripts/backfillFixtureEnrichment.js"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +20,8 @@
   "type": "commonjs",
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
-    "dotenv": "^17.2.2"
+    "dotenv": "^17.2.2",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.16.3"
   }
 }

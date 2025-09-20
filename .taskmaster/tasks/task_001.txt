@@ -1,0 +1,55 @@
+# Task ID: 1
+# Title: EPIC: Fortalecer pipeline de ingestão e cron jobs
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Implementar locks, backfill por lacunas, suporte a targets no enrichment, ajustes de cron e segurança, além de observabilidade e retries.
+# Details:
+
+
+# Test Strategy:
+Testes concorrentes, simulações de backfill com lacunas, chamadas com targets e verificação de crons, além de checagens de métricas/logs em ingestion_runs.
+
+# Subtasks:
+## 1. Adicionar advisory locks nas Edge Functions [pending]
+### Dependencies: None
+### Description: Usar pg_try_advisory_lock/pg_advisory_unlock (via RPC ou queries) e abortar execução se já houver lock.
+### Details:
+
+
+## 2. Backfill por lacunas: selecionar fixtures sem enriquecimento [pending]
+### Dependencies: None
+### Description: Selecionar fixtures que estejam sem participants/scores/periods/lineups/detalhes/odds/weather, ordenadas por starting_at asc, com limit e cursor.
+### Details:
+
+
+## 3. Suporte real a targets no enrichment [pending]
+### Dependencies: None
+### Description: Respeitar payload.targets para controlar includes na chamada Sportmonks e upserts por tabela.
+### Details:
+
+
+## 4. Ajustar malha de cron jobs e segurança de tokens [pending]
+### Dependencies: None
+### Description: Atualizar schedules (delta 15min, optional delta_live 3–5min, enrichment daily 08/20h, enrichment hourly leve, backfill 3–5min) e usar current_setting para Authorization.
+### Details:
+
+
+## 5. Retry/backoff e métricas detalhadas nos logs [pending]
+### Dependencies: None
+### Description: Adicionar retries com backoff exponencial para HTTP, e salvar em ingestion_runs.details métricas por alvo e HTTP status.
+### Details:
+
+
+## 6. Consultas e scripts de validação [pending]
+### Dependencies: None
+### Description: Criar queries e scripts para medir lacunas, progresso do backfill, e frescor dos dados; documentar em docs/.
+### Details:
+
+
+## 7. Documentação e rollout [pending]
+### Dependencies: None
+### Description: Atualizar README e docs com nova malha de crons, variáveis, operações de backfill e alvos; plano de rollout e monitoramento.
+### Details:
+
+

@@ -30,6 +30,8 @@ Ingests football data from the Sportmonks API (v3) and persists it to a Supabase
 - `npm run seed:fixtures` – upserts a sample of fixtures (20 by default).
 - `npm run seed:all` – orchestrates ingestion for every configured entity. Use `--only` to target specific tables (e.g. `npm run seed:all -- --only fixtures`).
 - `npm run seed:fixture-details` – downloads events and statistics for fixtures in batches. Supports options such as `--limit`, `--start-after`, `--batch-size`, `--page-size`, `--skip-events`, and `--skip-stats`.
+- `npm run monitor` – displays comprehensive pipeline status including ingestion summary, table counts, and enriched fixtures.
+- `npm run backfill:enrichment` – backfills enrichment tables (participants, scores, lineups, odds) for historical fixtures using the live edge function.
 
 Each seeding step uses `upsert` to keep data idempotent and respects the API pagination rules (including `filters=populate`) plus Sportmonks rate limiting headers.
 
@@ -81,3 +83,82 @@ O repositório inclui uma Edge Function (`supabase/functions/fixture-delta`) que
    ```
 
 A função lê o último checkpoint em `ingestion_state`, busca fixtures novos via `filters=IdAfter`, revisita uma janela recente configurável (`FIXTURE_DELTA_DAYS_BACK`/`FORWARD`) e faz `upsert` em `fixtures`, `fixture_events`, `fixture_statistics`. Cada execução é registrada em `ingestion_runs` para auditoria.
+
+## Sistema Expandido
+
+### Edge Functions Ativas
+
+1. **fixture-delta** - Atualização incremental de fixtures (2x por dia)
+2. **fixture-enrichment** - Enriquecimento com participantes, lineups, períodos, scores, odds e clima (2x por dia)
+
+### Novas Tabelas de Enriquecimento
+
+- `fixture_participants` – participantes (times) das fixtures com flags de localização, winner e payload bruto (`meta`)
+- `fixture_scores` – placares por tipo/período com resultado e payload completo
+- `fixture_periods` – períodos do jogo (1º tempo, 2º tempo, prorrogação, etc)
+- `fixture_lineups` – escalações dos times com posições/coordenadas
+- `fixture_lineup_details` – detalhes da escalação (substituições, banco, etc)
+- `fixture_odds` – odds básicas das casas de apostas para o fixture
+- `fixture_weather` – condições climáticas do jogo (1 linha por fixture)
+
+### Views e Funções Úteis
+
+- `v_fixtures_with_participants` – fixtures com participantes agregados + string `teams`
+- `v_ingestion_summary` – relatório de execuções dos últimos 30 dias
+- `get_fixture_stats(fixture_id)` – estatísticas rápidas de uma fixture
+- `get_team_fixtures(team_id, limit)` – fixtures de um time específico
+
+### Monitoramento
+
+Use `npm run monitor` para visualizar:
+- Status das ingestões
+- Contadores de registros
+- Fixtures recentes enriquecidas
+- Status dos cron jobs
+
+### Agendamentos Automáticos
+
+- **fixture-delta**: 6:00 e 18:00 UTC (fixtures, events, statistics)
+- **fixture-enrichment**: 8:00 e 20:00 UTC (participants, lineups, scores, períodos, odds, weather)
+
+Variáveis de ambiente úteis para a função de enrichment:
+
+- `FIXTURE_ENRICHMENT_DAYS_BACK` / `FIXTURE_ENRICHMENT_DAYS_FORWARD` – janela de reprocessamento (default 3 dias para trás, 1 para frente).
+- `FIXTURE_ENRICHMENT_INCLUDES` – lista de includes usada no endpoint `fixtures/multi`.
+
+### Backfill histórico
+
+- Rodar `npm run backfill:enrichment -- --start-date 1998-01-01 --end-date 2020-01-01 --page-size 500 --chunk-size 25` para enriquecer fixtures antigas.
+- A ferramenta processa páginas cronológicas, identifica fixtures sem `fixture_participants`, `fixture_scores`, `fixture_lineups` ou `fixture_lineup_details` e aciona a edge function em blocos.
+- Ajuste `--targets` (lista separada por vírgulas) para incluir outras tabelas (`fixture_odds`, `fixture_periods`, etc.) e `--sleep-ms` para respeitar limites da API.
+- Queries úteis para acompanhar o progresso:
+
+  ```sql
+  select date_trunc('year', starting_at) as year,
+         count(*) filter (where participant_count = 0) as fixtures_missing_participants,
+         count(*) as total_fixtures
+  from (
+    select f.id,
+           f.starting_at,
+           (select count(*) from fixture_participants fp where fp.fixture_id = f.id) as participant_count
+    from fixtures f
+  ) t
+  group by 1
+  order by 1;
+  ```
+
+## Validação de Cron Jobs e Ingestões
+
+- SQL: `sql/validate_cron_jobs.sql` lista cron jobs relevantes e últimas execuções com duração.
+- Script Node: `node scripts/validateCronJobs.js` imprime:
+  - Estado dos jobs (`cron.job`)
+  - Últimos `cron.job_run_details`
+  - Últimos `ingestion_runs`
+  - Amostra de métricas HTTP coletadas nas Edge Functions
+
+Exemplo de execução:
+
+```bash
+psql "$DATABASE_URL" -f sql/validate_cron_jobs.sql
+node scripts/validateCronJobs.js
+```
