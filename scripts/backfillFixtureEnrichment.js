@@ -112,7 +112,8 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pageSize = Number(args['page-size'] || args.pageSize || 500);
   const chunkSize = Number(args['chunk-size'] || args.chunkSize || 25);
-  const sleepMs = Number(args['sleep-ms'] || args.sleepMs || 500);
+  const sleepMs = Number(args['sleep-ms'] || args.sleepMs || 10000);
+  const sleepNoopMs = Number(args['sleep-noop-ms'] || args.sleepNoopMs || Math.max(sleepMs, 10000));
   const maxPages = args['max-pages'] ? Number(args['max-pages']) : Infinity;
   const maxFixtures = args['max-fixtures'] ? Number(args['max-fixtures']) : Infinity;
   const startDate = toISODate(args['start-date'], undefined);
@@ -168,12 +169,26 @@ async function main() {
           ? chunkIds.slice(0, remainingCapacity)
           : chunkIds;
 
-        try {
-          const result = await invokeEnrichment(idsToProcess, targets);
-          totalProcessed += idsToProcess.length;
-          console.log(`  → Enriched ${idsToProcess.length} fixtures`, result);
-        } catch (error) {
-          console.error(`  ✖ Failed enrichment for fixtures ${idsToProcess.join(', ')}:`, error.message);
+        let completed = false;
+        let attempts = 0;
+        while (!completed) {
+          attempts += 1;
+          try {
+            const result = await invokeEnrichment(idsToProcess, targets);
+            if (result && typeof result.message === 'string' && result.message.includes('Already running')) {
+              console.log(`  ↺ Concurrency (noop). Waiting ${sleepNoopMs}ms and retrying same chunk (attempt ${attempts})...`);
+              await new Promise((r) => setTimeout(r, sleepNoopMs));
+              continue;
+            }
+            totalProcessed += idsToProcess.length;
+            console.log(`  → Enriched ${idsToProcess.length} fixtures`, result);
+            completed = true;
+          } catch (error) {
+            console.error(`  ✖ Failed enrichment for fixtures ${idsToProcess.join(', ')}:`, error.message);
+            // Pequena espera antes de prosseguir para evitar hot loop em caso de erro transitório
+            await new Promise((r) => setTimeout(r, Math.max(2000, sleepMs)));
+            completed = true; // não re-tenta automaticamente erros não concorrenciais
+          }
         }
         if (sleepMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, sleepMs));
