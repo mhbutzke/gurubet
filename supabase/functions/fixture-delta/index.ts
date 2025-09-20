@@ -15,8 +15,11 @@ if (!SPORTMONKS_API_KEY) {
 }
 
 const SPORTMONKS_BASE = "https://api.sportmonks.com/v3";
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-const metadata = supabase.schema("metadata");
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  db: {
+    schema: "public",
+  },
+});
 
 const DEFAULT_LIMIT = Number(Deno.env.get("FIXTURE_DELTA_LIMIT") ?? 5000);
 const PER_PAGE = Number(Deno.env.get("FIXTURE_DELTA_PER_PAGE") ?? 50);
