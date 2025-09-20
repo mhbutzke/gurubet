@@ -64,7 +64,8 @@ async function fetchFixturePage({ startDate, endDate, page, pageSize, ascending 
        fixture_periods(count),
        fixture_lineups(count),
        fixture_lineup_details(count),
-       fixture_odds(count)`
+       fixture_odds(count),
+       fixture_weather(count)`
     )
     .order('starting_at', orderOpts)
     .range(from, to);
@@ -83,14 +84,14 @@ function needsEnrichment(row, targets) {
   return targets.some((relation) => relationCount(row, relation) === 0);
 }
 
-async function invokeEnrichment(ids) {
+async function invokeEnrichment(ids, targets) {
   const response = await fetch(FUNCTION_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
     },
-    body: JSON.stringify({ fixture_ids: ids }),
+    body: JSON.stringify({ fixture_ids: ids, targets }),
   });
 
   let body;
@@ -121,8 +122,11 @@ async function main() {
   const targets = (args.targets ? args.targets.split(',') : [
     'fixture_participants',
     'fixture_scores',
+    'fixture_periods',
     'fixture_lineups',
     'fixture_lineup_details',
+    'fixture_weather',
+    'fixture_odds',
   ]).map((name) => name.trim()).filter(Boolean);
 
   console.log('Backfill configuration:', {
@@ -165,7 +169,7 @@ async function main() {
           : chunkIds;
 
         try {
-          const result = await invokeEnrichment(idsToProcess);
+          const result = await invokeEnrichment(idsToProcess, targets);
           totalProcessed += idsToProcess.length;
           console.log(`  → Enriched ${idsToProcess.length} fixtures`, result);
         } catch (error) {
