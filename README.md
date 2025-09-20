@@ -41,6 +41,7 @@ Each seeding step uses `upsert` to keep data idempotent and respects the API pag
 - `0003_create_football_entities.sql` – leagues, teams, seasons, etc.
 - `0004_alter_fixtures_nullable.sql` – relaxes not-null constraints to match API payloads.
 - `0005_create_fixture_details.sql` – schema for `fixture_events` and `fixture_statistics`.
+- `0006_create_ingestion_metadata.sql` – cria as tabelas `metadata.ingestion_state` e `metadata.ingestion_runs` para orquestrar cargas incrementais.
 
 Apply the migrations in order using Supabase SQL editor or `psql`:
 ```bash
@@ -50,3 +51,20 @@ psql "postgres://postgres:<password>@db.<project>.supabase.co:6543/postgres?sslm
 ## Logs
 
 Execution logs (`*.log`) remain local-only and are excluded via `.gitignore`.
+
+## Incremental Updates
+
+O repositório inclui uma Edge Function (`supabase/functions/fixture-delta`) que executa a carga incremental diária diretamente dentro do Supabase. Passos recomendados:
+
+1. Aplicar os migrations até `0006_create_ingestion_metadata.sql` para habilitar as tabelas de estado.
+2. Definir as variáveis no projeto Supabase (`SUPABASE_SERVICE_ROLE_KEY`, `SPORTMONKS_API_KEY`, opcionais `FIXTURE_DELTA_LIMIT`, `FIXTURE_DELTA_PER_PAGE`, `FIXTURE_DELTA_BATCH_SIZE`).
+3. Implantar a função: `supabase functions deploy fixture-delta`.
+4. Testar manualmente: `supabase functions invoke fixture-delta --no-verify-jwt --body '{"limit": 1000}'`.
+5. Agendar via cron do Supabase (ex.: duas execuções diárias):
+   ```bash
+   supabase functions schedule create fixture-delta-daily \
+     --function fixture-delta \
+     --cron "0 6,18 * * *"
+   ```
+
+A função lê o último checkpoint em `metadata.ingestion_state`, busca fixtures novos via `filters=IdAfter`, atualiza `fixtures`, `fixture_events`, `fixture_statistics`, e registra execuções em `metadata.ingestion_runs`.
