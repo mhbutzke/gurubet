@@ -42,6 +42,7 @@ Each seeding step uses `upsert` to keep data idempotent and respects the API pag
 - `0004_alter_fixtures_nullable.sql` – relaxes not-null constraints to match API payloads.
 - `0005_create_fixture_details.sql` – schema for `fixture_events` and `fixture_statistics`.
 - `0006_create_ingestion_metadata.sql` – cria as tabelas `metadata.ingestion_state` e `metadata.ingestion_runs` para orquestrar cargas incrementais.
+- `0007_create_ingestion_tables_public.sql` – replica as tabelas de metadados no schema `public` para uso das Edge Functions.
 
 Apply the migrations in order using Supabase SQL editor or `psql`:
 ```bash
@@ -56,7 +57,7 @@ Execution logs (`*.log`) remain local-only and are excluded via `.gitignore`.
 
 O repositório inclui uma Edge Function (`supabase/functions/fixture-delta`) que executa a carga incremental diária diretamente dentro do Supabase. Passos recomendados:
 
-1. Aplicar os migrations até `0006_create_ingestion_metadata.sql` para habilitar as tabelas de estado.
+1. Aplicar os migrations até `0007_create_ingestion_tables_public.sql` para habilitar as tabelas de estado.
 2. Definir as variáveis no projeto Supabase (`SERVICE_ROLE_KEY`, `SPORTMONKS_API_KEY`, opcionais `FIXTURE_DELTA_LIMIT`, `FIXTURE_DELTA_PER_PAGE`, `FIXTURE_DELTA_BATCH_SIZE`). No dashboard, evite prefixos `SUPABASE_` (o painel bloqueia esses nomes); use exatamente `SERVICE_ROLE_KEY`.
 3. Implantar a função: `supabase functions deploy fixture-delta`.
 4. Testar manualmente: `supabase functions invoke fixture-delta --no-verify-jwt --body '{"limit": 1000}'`.

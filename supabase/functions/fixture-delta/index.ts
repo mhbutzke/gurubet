@@ -191,7 +191,7 @@ async function updateIngestionState(entity: string, lastId: number | null, lastT
     last_id: lastId,
     last_timestamp: lastTimestamp,
   }];
-  const { error } = await metadata
+  const { error } = await supabase
     .from("ingestion_state")
     .upsert(records, { onConflict: "entity" });
   if (error) {
@@ -209,14 +209,14 @@ async function insertRunLog(entity: string, status: string, startedAt: string, p
     error_message: errorMessage ?? null,
     details: details ? JSON.stringify(details) : null,
   };
-  const { error } = await metadata.from("ingestion_runs").insert(logEntry);
+  const { error } = await supabase.from("ingestion_runs").insert(logEntry);
   if (error) {
     console.error("Failed to insert ingestion run log:", error.message);
   }
 }
 
 async function getStartAfter(defaultValue: number) {
-  const { data, error } = await metadata
+  const { data, error } = await supabase
     .from("ingestion_state")
     .select("last_id")
     .eq("entity", "fixtures")
