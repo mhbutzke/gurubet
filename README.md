@@ -58,9 +58,21 @@ Execution logs (`*.log`) remain local-only and are excluded via `.gitignore`.
 O repositório inclui uma Edge Function (`supabase/functions/fixture-delta`) que executa a carga incremental diária diretamente dentro do Supabase. Passos recomendados:
 
 1. Aplicar os migrations até `0007_create_ingestion_tables_public.sql` para habilitar as tabelas de estado.
-2. Definir as variáveis no projeto Supabase (`SERVICE_ROLE_KEY`, `SPORTMONKS_API_KEY`, opcionais `FIXTURE_DELTA_LIMIT`, `FIXTURE_DELTA_PER_PAGE`, `FIXTURE_DELTA_BATCH_SIZE`). No dashboard, evite prefixos `SUPABASE_` (o painel bloqueia esses nomes); use exatamente `SERVICE_ROLE_KEY`.
+2. Definir as variáveis no projeto Supabase (`SERVICE_ROLE_KEY`, `SPORTMONKS_API_KEY`, opcionais `FIXTURE_DELTA_LIMIT`, `FIXTURE_DELTA_PER_PAGE`, `FIXTURE_DELTA_BATCH_SIZE`, `FIXTURE_DELTA_DAYS_BACK`, `FIXTURE_DELTA_DAYS_FORWARD`). No dashboard, evite prefixos `SUPABASE_` (o painel bloqueia esses nomes); use exatamente `SERVICE_ROLE_KEY`.
 3. Implantar a função: `supabase functions deploy fixture-delta`.
-4. Testar manualmente: `supabase functions invoke fixture-delta --no-verify-jwt --body '{"limit": 1000}'`.
+4. Testar manualmente. Exemplos:
+   - CLI recente: `supabase functions invoke fixture-delta --headers "Authorization: Bearer <ANON_KEY>" --body '{"limit": 1000}'`
+   - Via SQL Editor (extensões `pg_net` + `pg_cron`):
+     ```sql
+     select net.http_post(
+       url      := 'https://<project>.supabase.co/functions/v1/fixture-delta',
+       body     := jsonb_build_object('limit', 1000),
+       headers  := jsonb_build_object(
+         'Content-Type', 'application/json',
+         'Authorization', 'Bearer <ANON_KEY>'
+       )
+     );
+     ```
 5. Agendar via cron do Supabase (ex.: duas execuções diárias):
    ```bash
    supabase functions schedule create fixture-delta-daily \
@@ -68,4 +80,4 @@ O repositório inclui uma Edge Function (`supabase/functions/fixture-delta`) que
      --cron "0 6,18 * * *"
    ```
 
-A função lê o último checkpoint em `metadata.ingestion_state`, busca fixtures novos via `filters=IdAfter`, atualiza `fixtures`, `fixture_events`, `fixture_statistics`, e registra execuções em `metadata.ingestion_runs`.
+A função lê o último checkpoint em `ingestion_state`, busca fixtures novos via `filters=IdAfter`, revisita uma janela recente configurável (`FIXTURE_DELTA_DAYS_BACK`/`FORWARD`) e faz `upsert` em `fixtures`, `fixture_events`, `fixture_statistics`. Cada execução é registrada em `ingestion_runs` para auditoria.

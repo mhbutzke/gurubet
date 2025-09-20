@@ -24,6 +24,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const DEFAULT_LIMIT = Number(Deno.env.get("FIXTURE_DELTA_LIMIT") ?? 5000);
 const PER_PAGE = Number(Deno.env.get("FIXTURE_DELTA_PER_PAGE") ?? 50);
 const BATCH_SIZE = Number(Deno.env.get("FIXTURE_DELTA_BATCH_SIZE") ?? 50);
+const DAYS_BACK = Number(Deno.env.get("FIXTURE_DELTA_DAYS_BACK") ?? 1);
+const DAYS_FORWARD = Number(Deno.env.get("FIXTURE_DELTA_DAYS_FORWARD") ?? 0);
 const RATE_THRESHOLD = Number(Deno.env.get("SPORTMONKS_RATE_THRESHOLD") ?? 50);
 const RATE_WAIT_MS = Number(Deno.env.get("SPORTMONKS_RATE_WAIT_MS") ?? 1000);
 
@@ -215,16 +217,19 @@ async function insertRunLog(entity: string, status: string, startedAt: string, p
   }
 }
 
-async function getStartAfter(defaultValue: number) {
+async function getIngestionState(entity: string) {
   const { data, error } = await supabase
     .from("ingestion_state")
-    .select("last_id")
-    .eq("entity", "fixtures")
+    .select("last_id, last_timestamp")
+    .eq("entity", entity)
     .maybeSingle();
   if (error) {
     throw new Error(`Failed to read ingestion state: ${error.message}`);
   }
-  return data?.last_id ?? defaultValue;
+  return {
+    lastId: data?.last_id ?? null,
+    lastTimestamp: data?.last_timestamp ?? null,
+  };
 }
 
 async function collectFixtures(startAfter: number, limit: number) {
@@ -254,6 +259,35 @@ async function collectFixtures(startAfter: number, limit: number) {
   }
 
   return { fixtures, lastId: cursor };
+}
+
+function formatDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+async function collectFixturesBetween(fromDate: string, toDate: string) {
+  const fixtures: any[] = [];
+  let page = 1;
+
+  while (true) {
+    const url = new URL(`${SPORTMONKS_BASE}/football/fixtures/between/${fromDate}/${toDate}`);
+    url.searchParams.set("api_token", SPORTMONKS_API_KEY);
+    url.searchParams.set("per_page", String(PER_PAGE));
+    url.searchParams.set("page", String(page));
+
+    const { payload, rateLimit } = await fetchSportmonks(url);
+    await maybePause(rateLimit, "fixtures/between");
+
+    const batch = payload?.data ?? [];
+    if (!Array.isArray(batch) || batch.length === 0) break;
+
+    fixtures.push(...batch);
+
+    if (batch.length < PER_PAGE) break;
+    page += 1;
+  }
+
+  return fixtures;
 }
 
 async function fetchDetailsForFixtures(ids: number[]) {
@@ -297,11 +331,53 @@ serve(async (request) => {
     const explicitStart = typeof payload.startAfter === "number" ? payload.startAfter : null;
     const limit = typeof payload.limit === "number" ? payload.limit : DEFAULT_LIMIT;
 
-    const startAfter = explicitStart ?? await getStartAfter(0);
-    const { fixtures, lastId } = await collectFixtures(startAfter, limit);
+    const payloadFromDate = typeof payload.fromDate === "string" ? payload.fromDate : null;
+    const payloadToDate = typeof payload.toDate === "string" ? payload.toDate : null;
+
+    const state = await getIngestionState("fixtures");
+    const startAfter = explicitStart ?? state.lastId ?? 0;
+    const { fixtures: newFixtures, lastId } = await collectFixtures(startAfter, limit);
+
+    const fixtureMap = new Map<number, any>();
+    newFixtures.forEach((fixture) => fixtureMap.set(fixture.id, fixture));
+
+    let rangeFixtures: any[] = [];
+    const usePayloadRange = payloadFromDate && payloadToDate;
+    const parsedDaysBack = payload.daysBack !== undefined ? Number(payload.daysBack) : NaN;
+    const parsedDaysForward = payload.daysForward !== undefined ? Number(payload.daysForward) : NaN;
+    const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : DAYS_BACK;
+    const daysForward = Number.isFinite(parsedDaysForward) ? parsedDaysForward : DAYS_FORWARD;
+
+    if (usePayloadRange || daysBack >= 0 || daysForward > 0) {
+      let fromDate: string;
+      let toDate: string;
+
+      if (usePayloadRange) {
+        fromDate = payloadFromDate!;
+        toDate = payloadToDate!;
+      } else {
+        const today = new Date();
+        const utcToday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+        const from = new Date(utcToday);
+        from.setUTCDate(from.getUTCDate() - Math.max(0, daysBack));
+        const to = new Date(utcToday);
+        to.setUTCDate(to.getUTCDate() + Math.max(0, daysForward));
+        fromDate = formatDate(from);
+        toDate = formatDate(to);
+      }
+
+      rangeFixtures = await collectFixturesBetween(fromDate, toDate);
+      rangeFixtures.forEach((fixture) => fixtureMap.set(fixture.id, fixture));
+    }
+
+    const fixtures = Array.from(fixtureMap.values());
 
     if (!fixtures.length) {
-      await insertRunLog("fixtures", "noop", startedAt, 0, undefined, { startAfter });
+      await insertRunLog("fixtures", "noop", startedAt, 0, undefined, {
+        startAfter,
+        daysBack,
+        daysForward,
+      });
       return new Response(JSON.stringify({ message: "No new fixtures", startAfter }), {
         headers: { "Content-Type": "application/json" },
         status: 200,
@@ -328,17 +404,29 @@ serve(async (request) => {
       .sort()
       .pop() ?? null;
 
-    await updateIngestionState("fixtures", lastId, maxStartingAt);
+    const maxFixtureId = fixtureIds.reduce(
+      (acc, id) => (id > acc ? id : acc),
+      state.lastId ?? 0,
+    );
+    const newLastId = Math.max(state.lastId ?? 0, lastId ?? 0, maxFixtureId);
+    const newLastTimestamp = maxStartingAt ?? state.lastTimestamp ?? null;
+
+    await updateIngestionState("fixtures", newLastId, newLastTimestamp);
 
     await insertRunLog("fixtures", "success", startedAt, fixtures.length, undefined, {
+      newFixtures: newFixtures.length,
+      dateRangeFixtures: rangeFixtures.length,
       events: eventRows.length,
       statistics: statRows.length,
+      lastId: newLastId,
+      daysBack,
+      daysForward,
     });
 
     return new Response(
       JSON.stringify({
         fixturesProcessed: fixtures.length,
-        lastId,
+        lastId: newLastId,
         eventsUpserted: eventRows.length,
         statisticsUpserted: statRows.length,
       }),
