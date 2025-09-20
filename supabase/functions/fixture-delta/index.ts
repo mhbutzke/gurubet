@@ -16,6 +16,7 @@ if (!SPORTMONKS_API_KEY) {
 
 const SPORTMONKS_BASE = "https://api.sportmonks.com/v3";
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const metadata = supabase.schema("metadata");
 
 const DEFAULT_LIMIT = Number(Deno.env.get("FIXTURE_DELTA_LIMIT") ?? 5000);
 const PER_PAGE = Number(Deno.env.get("FIXTURE_DELTA_PER_PAGE") ?? 50);
@@ -187,8 +188,8 @@ async function updateIngestionState(entity: string, lastId: number | null, lastT
     last_id: lastId,
     last_timestamp: lastTimestamp,
   }];
-  const { error } = await supabase
-    .from("metadata.ingestion_state")
+  const { error } = await metadata
+    .from("ingestion_state")
     .upsert(records, { onConflict: "entity" });
   if (error) {
     throw new Error(`Failed to update ingestion state for ${entity}: ${error.message}`);
@@ -205,15 +206,15 @@ async function insertRunLog(entity: string, status: string, startedAt: string, p
     error_message: errorMessage ?? null,
     details: details ? JSON.stringify(details) : null,
   };
-  const { error } = await supabase.from("metadata.ingestion_runs").insert(logEntry);
+  const { error } = await metadata.from("ingestion_runs").insert(logEntry);
   if (error) {
     console.error("Failed to insert ingestion run log:", error.message);
   }
 }
 
 async function getStartAfter(defaultValue: number) {
-  const { data, error } = await supabase
-    .from("metadata.ingestion_state")
+  const { data, error } = await metadata
+    .from("ingestion_state")
     .select("last_id")
     .eq("entity", "fixtures")
     .maybeSingle();
