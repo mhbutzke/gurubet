@@ -75,12 +75,108 @@
             "parentTaskId": 1
           }
         ]
+      },
+      {
+        "id": 2,
+        "title": "EPIC: Backfill histórico por ano (2025 → 2024 → 2023)",
+        "description": "Enriquecer tabelas históricas ano a ano usando a Edge Function fixture-enrichment (targets completos) orquestrada pelo script backfillFixtureEnrichment.js, validando cobertura por alvo ao final de cada ano.",
+        "details": "Fluxo: (1) Rodar backfill 2025 com targets completos e limites respeitando Sportmonks (page-size 500, chunk-size 25, sleep 800ms), (2) Validar cobertura por alvo com queries de coverage, (3) Passar para 2024 e repetir, (4) Passar para 2023 e repetir. Em caso de erro 422 (50 IDs), já tratamos batch<=50 na Edge. Usar ingestion_runs e script validateCronJobs para auditoria.",
+        "testStrategy": "- Conferir ingestion_runs (success/errors) e métricas HTTP.\n- Rodar SQL de cobertura por alvo por ano e checar percentuais.\n- Spot check de dados em views v_fixtures_with_participants e funções utilitárias.",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Backfill 2025 (jan–dez) com targets completos",
+            "description": "Executar backfill de 2025 com targets: participants, scores, periods, lineups, lineup_details, weather, odds; validar cobertura.",
+            "details": "Comando inicial:\nnode scripts/backfillFixtureEnrichment.js --start-date 2025-01-01 --end-date 2026-01-01 --page-size 500 --chunk-size 25 --sleep-ms 800 --max-pages 2000 --max-fixtures 200000\nCobertura por alvo:\nWITH f AS (...)\nSELECT counts por alvo;",
+            "status": "in-progress",
+            "dependencies": [],
+            "parentTaskId": 2
+          },
+          {
+            "id": 2,
+            "title": "Backfill 2024 (jan–dez) após validação 2025",
+            "description": "Repetir o fluxo de 2025 ajustando período para 2024.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 2
+          },
+          {
+            "id": 3,
+            "title": "Backfill 2023 (jan–dez) após validação 2024",
+            "description": "Repetir o fluxo para 2023.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 2
+          },
+          {
+            "id": 4,
+            "title": "Cobertura 2025 (99.9%) – Guard automático",
+            "description": "Criar função SQL e cron que monitora cobertura de 2025 e, se <99.9% em qualquer alvo, dispara fixture-enrichment (mode=missing) focado em 2025.",
+            "details": "",
+            "status": "in-progress",
+            "dependencies": [],
+            "parentTaskId": 2
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "EPIC: Dados completos 2023+ e near real-time",
+        "description": "Garantir completude de 2023 em diante e atualização quase em tempo real: reorganização de cron jobs, cobertura/telemetria, e preparação de escala.",
+        "details": "- Dividir cron histórico em dois grupos (leve e pesado) na janela BRT 01–08 (UTC 04–11)\n- Adicionar cron de lineups hourly fora da janela\n- Criar visão/tabela de cobertura e cron de snapshot diário\n- Planejar particionamento por ano (events/statistics/lineup_details/odds)\n- Alertas de meta e dashboard\n- Continuar backfill anual até 99.9% por alvo",
+        "testStrategy": "",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Split cron histórico (leve/pesado) na janela BRT 01–08",
+            "description": "Criar dois cron jobs para enrichment missing: grupo leve (participants,scores,periods) e pesado (lineups,lineup_details,odds,weather)",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 3
+          },
+          {
+            "id": 2,
+            "title": "Lineups hourly catch-up fora da janela",
+            "description": "Cron pequeno a cada hora com targets lineups+lineup_details (limit baixo) para jogos recentes/concluídos.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 3
+          },
+          {
+            "id": 3,
+            "title": "MV `mv_coverage_by_month_target` + snapshot diário",
+            "description": "Criar materialized view de cobertura por mês/target e cron diário para snapshot em tabela histórica.",
+            "details": "",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 3
+          },
+          {
+            "id": 4,
+            "title": "Particionar por ano (events, statistics)",
+            "description": "Criar partições por ano para fixture_events e fixture_statistics; planejar lineup_details/odds para fase 2.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 3
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-09-20T22:26:53.866Z",
       "description": "Default tasks context",
-      "updated": "2025-09-20T23:36:12.671Z"
+      "updated": "2025-09-22T13:36:11.689Z"
     }
   }
 }

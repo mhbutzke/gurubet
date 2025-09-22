@@ -67,6 +67,8 @@ function buildIncludesFromTargets(targets: string[]): string {
         break;
       case "fixture_lineups":
       case "fixture_lineup_details":
+        // É necessário incluir o recurso raiz 'lineups' além dos includes aninhados
+        includeTokens.add("lineups");
         includeTokens.add("lineups.player");
         includeTokens.add("lineups.details");
         break;

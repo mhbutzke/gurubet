@@ -1,0 +1,42 @@
+# Task ID: 3
+# Title: EPIC: Dados completos 2023+ e near real-time
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Garantir completude de 2023 em diante e atualização quase em tempo real: reorganização de cron jobs, cobertura/telemetria, e preparação de escala.
+# Details:
+- Dividir cron histórico em dois grupos (leve e pesado) na janela BRT 01–08 (UTC 04–11)
+- Adicionar cron de lineups hourly fora da janela
+- Criar visão/tabela de cobertura e cron de snapshot diário
+- Planejar particionamento por ano (events/statistics/lineup_details/odds)
+- Alertas de meta e dashboard
+- Continuar backfill anual até 99.9% por alvo
+
+# Test Strategy:
+
+
+# Subtasks:
+## 1. Split cron histórico (leve/pesado) na janela BRT 01–08 [in-progress]
+### Dependencies: None
+### Description: Criar dois cron jobs para enrichment missing: grupo leve (participants,scores,periods) e pesado (lineups,lineup_details,odds,weather)
+### Details:
+
+
+## 2. Lineups hourly catch-up fora da janela [pending]
+### Dependencies: None
+### Description: Cron pequeno a cada hora com targets lineups+lineup_details (limit baixo) para jogos recentes/concluídos.
+### Details:
+
+
+## 3. MV `mv_coverage_by_month_target` + snapshot diário [pending]
+### Dependencies: None
+### Description: Criar materialized view de cobertura por mês/target e cron diário para snapshot em tabela histórica.
+### Details:
+
+
+## 4. Particionar por ano (events, statistics) [pending]
+### Dependencies: None
+### Description: Criar partições por ano para fixture_events e fixture_statistics; planejar lineup_details/odds para fase 2.
+### Details:
+
+

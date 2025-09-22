@@ -1,0 +1,43 @@
+# Task ID: 2
+# Title: EPIC: Backfill histórico por ano (2025 → 2024 → 2023)
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Enriquecer tabelas históricas ano a ano usando a Edge Function fixture-enrichment (targets completos) orquestrada pelo script backfillFixtureEnrichment.js, validando cobertura por alvo ao final de cada ano.
+# Details:
+Fluxo: (1) Rodar backfill 2025 com targets completos e limites respeitando Sportmonks (page-size 500, chunk-size 25, sleep 800ms), (2) Validar cobertura por alvo com queries de coverage, (3) Passar para 2024 e repetir, (4) Passar para 2023 e repetir. Em caso de erro 422 (50 IDs), já tratamos batch<=50 na Edge. Usar ingestion_runs e script validateCronJobs para auditoria.
+
+# Test Strategy:
+- Conferir ingestion_runs (success/errors) e métricas HTTP.
+- Rodar SQL de cobertura por alvo por ano e checar percentuais.
+- Spot check de dados em views v_fixtures_with_participants e funções utilitárias.
+
+# Subtasks:
+## 1. Backfill 2025 (jan–dez) com targets completos [in-progress]
+### Dependencies: None
+### Description: Executar backfill de 2025 com targets: participants, scores, periods, lineups, lineup_details, weather, odds; validar cobertura.
+### Details:
+Comando inicial:
+node scripts/backfillFixtureEnrichment.js --start-date 2025-01-01 --end-date 2026-01-01 --page-size 500 --chunk-size 25 --sleep-ms 800 --max-pages 2000 --max-fixtures 200000
+Cobertura por alvo:
+WITH f AS (...)
+SELECT counts por alvo;
+
+## 2. Backfill 2024 (jan–dez) após validação 2025 [pending]
+### Dependencies: None
+### Description: Repetir o fluxo de 2025 ajustando período para 2024.
+### Details:
+
+
+## 3. Backfill 2023 (jan–dez) após validação 2024 [pending]
+### Dependencies: None
+### Description: Repetir o fluxo para 2023.
+### Details:
+
+
+## 4. Cobertura 2025 (99.9%) – Guard automático [in-progress]
+### Dependencies: None
+### Description: Criar função SQL e cron que monitora cobertura de 2025 e, se <99.9% em qualquer alvo, dispara fixture-enrichment (mode=missing) focado em 2025.
+### Details:
+
+
