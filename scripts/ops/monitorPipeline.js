@@ -85,7 +85,7 @@ async function monitorPipeline() {
     console.log('\n💡 Comandos úteis:');
     console.log('   npm run test:connection     - Testar conexão Supabase');
     console.log('   npm run inspect:fixtures    - Inspecionar API Sportmonks');
-    console.log('   node scripts/monitorPipeline.js - Este relatório');
+    console.log('   node scripts/ops/monitorPipeline.js - Este relatório');
 
   } catch (error) {
     console.error('❌ Erro no monitoramento:', error.message);

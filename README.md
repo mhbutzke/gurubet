@@ -149,8 +149,8 @@ Variáveis de ambiente úteis para a função de enrichment:
 
 ## Validação de Cron Jobs e Ingestões
 
-- SQL: `sql/validate_cron_jobs.sql` lista cron jobs relevantes e últimas execuções com duração.
-- Script Node: `node scripts/validateCronJobs.js` imprime:
+- SQL: `archive/sql/validate_cron_jobs.sql` lista cron jobs relevantes e últimas execuções com duração.
+- Script Node: `node scripts/ops/validateCronJobs.js` imprime:
   - Estado dos jobs (`cron.job`)
   - Últimos `cron.job_run_details`
   - Últimos `ingestion_runs`
@@ -159,6 +159,77 @@ Variáveis de ambiente úteis para a função de enrichment:
 Exemplo de execução:
 
 ```bash
-psql "$DATABASE_URL" -f sql/validate_cron_jobs.sql
-node scripts/validateCronJobs.js
+psql "$DATABASE_URL" -f archive/sql/validate_cron_jobs.sql
+node scripts/ops/validateCronJobs.js
 ```
+
+## Operações e Monitoramento
+
+### Janelas de execução (BRT)
+
+- 01:00–07:59: enriquecimento histórico (split)
+  - light (*/5): participants, scores, periods (limit 1000)
+  - heavy (1-59/5): lineups, lineup_details, odds, weather (limit 600)
+- 08:00–20:59: delta (*/5 live, */15 job) + lineups hourly (HH:15)
+- 21:00–23:59: delta (*/5 live, */15 job)
+- 01:45: snapshot cobertura diária; 02:00 alertas; 02:35–02:39 prep particionamento
+
+### Consultas rápidas
+
+```sql
+-- Últimas execuções de cron centralizadas (cron_runs)
+SELECT jobname, status, start_time, duration_ms, LEFT(COALESCE(return_message,''),80) AS msg
+FROM public.cron_runs
+ORDER BY start_time DESC
+LIMIT 20;
+
+-- Resumo de ingestão nas últimas 24h
+SELECT entity, status, COUNT(*) AS runs, SUM(processed_count) AS processed
+FROM public.ingestion_runs
+WHERE started_at > now() - interval '24 hours'
+GROUP BY entity, status
+ORDER BY entity, status;
+
+-- Cobertura por mês/target (MV)
+SELECT *
+FROM public.mv_coverage_by_month_target
+ORDER BY month DESC, target
+LIMIT 100;
+
+-- Top queries (pg_stat_statements)
+SELECT * FROM public.v_top_queries LIMIT 20;
+```
+
+### Testes seguros de Edge Functions (via SQL)
+
+Use `net.http_post` com o header service-role da instância (sem expor chaves):
+
+```sql
+-- fixture-delta (exemplo)
+SELECT net.http_post(
+  url := '<SUPABASE_URL>/functions/v1/fixture-delta',
+  body := jsonb_build_object('limit', 1500, 'daysBack', 1),
+  headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key', true)
+  )
+);
+
+-- fixture-enrichment (missing, light)
+SELECT net.http_post(
+  url := '<SUPABASE_URL>/functions/v1/fixture-enrichment',
+  body := jsonb_build_object('limit', 200, 'mode', 'missing',
+    'targets', jsonb_build_array('fixture_participants','fixture_scores','fixture_periods')),
+  headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'Authorization', 'Bearer ' || current_setting('app.settings.service_role_key', true)
+  )
+);
+```
+
+### Observabilidade
+
+- `ingestion_runs`: logs de delta/enrichment (success/error/noop)
+- `cron_runs`: todas as execuções de cron (sincronizadas de `cron.job_run_details`)
+- `coverage_snapshots`: histórico diário de cobertura por mês/target
+- `coverage_alerts`: violações de thresholds (2025=99.9%, 2024=99.0%, 2023=95.0%)

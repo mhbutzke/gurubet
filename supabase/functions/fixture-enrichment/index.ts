@@ -88,6 +88,19 @@ function buildIncludesFromTargets(targets: string[]): string {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function dedupeBy<T>(rows: T[], keyOf: (row: T) => string): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(row);
+    }
+  }
+  return result;
+}
+
 interface RateLimitInfo {
   remaining?: number;
   resets_in_seconds?: number;
@@ -333,7 +346,11 @@ async function getFixturesToEnrich(limit: number, payload: Record<string, unknow
   const daysForward = toNumber(payload?.days_forward) ?? DEFAULT_DAYS_FORWARD;
   const useMissing = (payload as any)?.mode === 'missing';
   const rawTargets = (payload as any)?.targets;
-  const targets = normaliseTargets(rawTargets);
+  let targets = normaliseTargets(rawTargets);
+  // Garantir dependência: se pedir lineup_details, incluir lineups também
+  if (targets.includes("fixture_lineup_details") && !targets.includes("fixture_lineups")) {
+    targets = [...targets, "fixture_lineups"];
+  }
 
   const now = Date.now();
   const since = new Date(now - daysBack * 86_400_000).toISOString();
@@ -515,37 +532,46 @@ serve(async (request) => {
       oddsRows,
     } = await fetchEnrichmentData(fixtureIds, includes, targetSet, metrics);
 
-    if (targetSet.has("fixture_participants") && participantRows.length) {
-      await chunkedUpsert("fixture_participants", participantRows);
+    // Deduplicar por chaves antes do upsert
+    const dedupedParticipants = dedupeBy(participantRows, (r: any) => `${r.fixture_id}:${r.participant_id ?? ''}`);
+    const dedupedScores = dedupeBy(scoreRows, (r: any) => String(r.id ?? ''));
+    const dedupedPeriods = dedupeBy(periodRows, (r: any) => String(r.id ?? ''));
+    const dedupedLineups = dedupeBy(lineupRows, (r: any) => String(r.id ?? ''));
+    const dedupedLineupDetails = dedupeBy(lineupDetailRows, (r: any) => String(r.id ?? ''));
+    const dedupedWeather = dedupeBy(weatherRows, (r: any) => String(r.fixture_id ?? ''));
+    const dedupedOdds = dedupeBy(oddsRows, (r: any) => String(r.id ?? ''));
+
+    if (targetSet.has("fixture_participants") && dedupedParticipants.length) {
+      await chunkedUpsert("fixture_participants", dedupedParticipants);
     }
-    if (targetSet.has("fixture_scores") && scoreRows.length) {
-      await chunkedUpsert("fixture_scores", scoreRows);
+    if (targetSet.has("fixture_scores") && dedupedScores.length) {
+      await chunkedUpsert("fixture_scores", dedupedScores);
     }
-    if (targetSet.has("fixture_periods") && periodRows.length) {
-      await chunkedUpsert("fixture_periods", periodRows);
+    if (targetSet.has("fixture_periods") && dedupedPeriods.length) {
+      await chunkedUpsert("fixture_periods", dedupedPeriods);
     }
-    if (targetSet.has("fixture_lineups") && lineupRows.length) {
-      await chunkedUpsert("fixture_lineups", lineupRows);
+    if (targetSet.has("fixture_lineups") && dedupedLineups.length) {
+      await chunkedUpsert("fixture_lineups", dedupedLineups);
     }
-    if (targetSet.has("fixture_lineup_details") && lineupDetailRows.length) {
-      await chunkedUpsert("fixture_lineup_details", lineupDetailRows);
+    if (targetSet.has("fixture_lineup_details") && dedupedLineupDetails.length) {
+      await chunkedUpsert("fixture_lineup_details", dedupedLineupDetails);
     }
-    if (targetSet.has("fixture_weather") && weatherRows.length) {
-      await chunkedUpsert("fixture_weather", weatherRows);
+    if (targetSet.has("fixture_weather") && dedupedWeather.length) {
+      await chunkedUpsert("fixture_weather", dedupedWeather);
     }
-    if (targetSet.has("fixture_odds") && oddsRows.length) {
-      await chunkedUpsert("fixture_odds", oddsRows);
+    if (targetSet.has("fixture_odds") && dedupedOdds.length) {
+      await chunkedUpsert("fixture_odds", dedupedOdds);
     }
 
     const summary = {
       fixturesEnriched: fixtureIds.length,
-      participants: participantRows.length,
-      scores: scoreRows.length,
-      periods: periodRows.length,
-      lineups: lineupRows.length,
-      lineupDetails: lineupDetailRows.length,
-      weather: weatherRows.length,
-      odds: oddsRows.length,
+      participants: dedupedParticipants.length,
+      scores: dedupedScores.length,
+      periods: dedupedPeriods.length,
+      lineups: dedupedLineups.length,
+      lineupDetails: dedupedLineupDetails.length,
+      weather: dedupedWeather.length,
+      odds: dedupedOdds.length,
       targets: Array.from(targetSet.values()),
     };
 

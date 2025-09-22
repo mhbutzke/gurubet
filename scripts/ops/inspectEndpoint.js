@@ -3,7 +3,7 @@ require('dotenv').config();
 const [, , endpoint, perPageArg] = process.argv;
 
 if (!endpoint) {
-  console.error('Uso: node scripts/inspectEndpoint.js <endpoint> [perPage]');
+  console.error('Uso: node scripts/ops/inspectEndpoint.js <endpoint> [perPage]');
   process.exit(1);
 }
 

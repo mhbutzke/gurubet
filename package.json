@@ -5,14 +5,15 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:connection": "node scripts/testConnection.js",
-    "inspect:fixtures": "node scripts/inspectFixtures.js",
-    "seed:fixtures": "node scripts/seedFixtures.js",
-    "inspect:endpoint": "node scripts/inspectEndpoint.js",
-    "seed:all": "node scripts/seedAll.js",
-    "seed:fixture-details": "node scripts/seedFixtureDetails.js",
-    "monitor": "node scripts/monitorPipeline.js",
-    "backfill:enrichment": "node scripts/backfillFixtureEnrichment.js"
+    "test:connection": "node scripts/ops/testConnection.js",
+    "inspect:fixtures": "node scripts/ops/inspectFixtures.js",
+    "seed:fixtures": "node scripts/ingestion/seedFixtures.js",
+    "inspect:endpoint": "node scripts/ops/inspectEndpoint.js",
+    "seed:all": "node scripts/ingestion/seedAll.js",
+    "seed:fixture-details": "node scripts/ingestion/seedFixtureDetails.js",
+    "monitor": "node scripts/ops/monitorPipeline.js",
+    "backfill:enrichment": "node scripts/ingestion/backfillFixtureEnrichment.js",
+    "setup:supabase-env": "node scripts/setup/setupSupabaseEnv.js"
   },
   "keywords": [],
   "author": "",
