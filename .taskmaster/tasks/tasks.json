@@ -171,12 +171,60 @@
             "parentTaskId": 3
           }
         ]
+      },
+      {
+        "id": 4,
+        "title": "EPIC: Enriquecimento Específico para Tabelas Pendentes",
+        "description": "Implementar backfill completo para fixture_weather (2023-2025), expandir fixture_referees para histórico (>20% cobertura), e melhorar cobertura de fixture_events/fixture_statistics para 95%+ em 2023-2025 via jobs dedicados e ajustes no enrichment. Incluir validação de cobertura pós-backfill e monitoramento via views analytics.",
+        "details": "",
+        "testStrategy": "",
+        "status": "in-progress",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Backfill completo para fixture_weather (2023-2025)",
+            "description": "Criar/atualizar job ou função para enriquecer todos fixtures de 2023-2025 com weather via fixture-enrichment (target=weather). Validar 100% cobertura pós-execução. Incluir cron diário para upcoming.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          },
+          {
+            "id": 2,
+            "title": "Expandir backfill para fixture_referees histórico",
+            "description": "Ajustar backfill_referees_multi ou enrichment para cobrir >100k fixtures de 2023-2025 (alvo 20-30% cobertura total). Usar /referees/multi para nomes. Validar referee_name preenchido.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          },
+          {
+            "id": 3,
+            "title": "Melhorar cobertura de fixture_events e fixture_statistics (95%+ 2023-2025)",
+            "description": "Criar job dedicado para historical gaps em events/stats (mode=missing, targets=events,statistics). Ajustar get_fixtures_missing_enrichment e cron para foco em 2023+. Validar unique fixtures com dados.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          },
+          {
+            "id": 4,
+            "title": "Validação de cobertura e monitoramento pós-enriquecimento",
+            "description": "Expandir v_ops_freshness_core para incluir weather/referees/events/stats. Criar alertas em coverage_alerts para <95% em histórico. Documentar queries de validação no README.",
+            "details": "",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-09-20T22:26:53.866Z",
       "description": "Default tasks context",
-      "updated": "2025-09-22T13:36:11.689Z"
+      "updated": "2025-09-24T12:52:00.088Z"
     }
   }
 }

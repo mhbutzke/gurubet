@@ -1,0 +1,37 @@
+# Task ID: 4
+# Title: EPIC: Enriquecimento Específico para Tabelas Pendentes
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Implementar backfill completo para fixture_weather (2023-2025), expandir fixture_referees para histórico (>20% cobertura), e melhorar cobertura de fixture_events/fixture_statistics para 95%+ em 2023-2025 via jobs dedicados e ajustes no enrichment. Incluir validação de cobertura pós-backfill e monitoramento via views analytics.
+# Details:
+
+
+# Test Strategy:
+
+
+# Subtasks:
+## 1. Backfill completo para fixture_weather (2023-2025) [pending]
+### Dependencies: None
+### Description: Criar/atualizar job ou função para enriquecer todos fixtures de 2023-2025 com weather via fixture-enrichment (target=weather). Validar 100% cobertura pós-execução. Incluir cron diário para upcoming.
+### Details:
+
+
+## 2. Expandir backfill para fixture_referees histórico [pending]
+### Dependencies: None
+### Description: Ajustar backfill_referees_multi ou enrichment para cobrir >100k fixtures de 2023-2025 (alvo 20-30% cobertura total). Usar /referees/multi para nomes. Validar referee_name preenchido.
+### Details:
+
+
+## 3. Melhorar cobertura de fixture_events e fixture_statistics (95%+ 2023-2025) [pending]
+### Dependencies: None
+### Description: Criar job dedicado para historical gaps em events/stats (mode=missing, targets=events,statistics). Ajustar get_fixtures_missing_enrichment e cron para foco em 2023+. Validar unique fixtures com dados.
+### Details:
+
+
+## 4. Validação de cobertura e monitoramento pós-enriquecimento [pending]
+### Dependencies: None
+### Description: Expandir v_ops_freshness_core para incluir weather/referees/events/stats. Criar alertas em coverage_alerts para <95% em histórico. Documentar queries de validação no README.
+### Details:
+
+

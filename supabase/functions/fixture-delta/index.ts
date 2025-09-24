@@ -388,7 +388,10 @@ serve(async (request) => {
     const daysBack = Number.isFinite(parsedDaysBack) ? parsedDaysBack : DAYS_BACK;
     const daysForward = Number.isFinite(parsedDaysForward) ? parsedDaysForward : DAYS_FORWARD;
 
-    if (usePayloadRange || daysBack >= 0 || daysForward > 0) {
+    // Só puxa a janela entre datas quando explicitamente solicitada ou quando
+    // os parâmetros daysBack/daysForward forem positivos. Com daysBack = 0
+    // (uso recorrente), evitamos reprocessar toda a janela a cada execução.
+    if (usePayloadRange || daysBack > 0 || daysForward > 0) {
       let fromDate: string;
       let toDate: string;
 

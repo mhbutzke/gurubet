@@ -233,3 +233,97 @@ SELECT net.http_post(
 - `cron_runs`: todas as execuções de cron (sincronizadas de `cron.job_run_details`)
 - `coverage_snapshots`: histórico diário de cobertura por mês/target
 - `coverage_alerts`: violações de thresholds (2025=99.9%, 2024=99.0%, 2023=95.0%)
+
+## Monitoring Jobs and Data Freshness
+
+You can query these views in the Supabase SQL Editor to monitor cron jobs and data freshness:
+
+```sql
+-- Overview of cron jobs (last run, status, duration)
+SELECT * FROM analytics.v_ops_jobs_overview;
+```
+
+```sql
+-- Job activity in the last 24 hours (runs, success/failure rates, performance)
+SELECT * FROM analytics.v_ops_jobs_24h;
+```
+
+```sql
+-- Freshness of core tables (total rows, last update, recent activity)
+SELECT * FROM analytics.v_ops_freshness_core;
+```
+
+```sql
+-- Refresh status of analytics materialized views (last run, performance over 7 days)
+SELECT * FROM analytics.v_ops_analytics_refresh;
+```
+
+These views provide a quick dashboard for operational monitoring. Run them daily to ensure data pipelines are healthy.
+
+#### Validação de Backfills e Cobertura Histórica
+
+Para verificar cobertura pós-backfill (ex.: 95%+ para 2023-2025):
+
+```sql
+-- Cobertura events por ano
+SELECT 
+  fixture_year,
+  COUNT(DISTINCT fixture_id)::numeric / (SELECT COUNT(*) FROM public.fixtures WHERE fixture_year = fe.fixture_year) as coverage_pct
+FROM public.fixture_events fe
+WHERE fixture_year BETWEEN 2023 AND 2025
+GROUP BY fixture_year
+ORDER BY fixture_year DESC;
+
+-- Similar para stats
+SELECT 
+  fixture_year,
+  COUNT(DISTINCT fixture_id)::numeric / (SELECT COUNT(*) FROM public.fixtures WHERE fixture_year = fs.fixture_year) as coverage_pct
+FROM public.fixture_statistics fs
+WHERE fixture_year BETWEEN 2023 AND 2025
+GROUP BY fixture_year
+ORDER BY fixture_year DESC;
+
+-- Weather coverage
+SELECT 
+  fixture_year,
+  COUNT(*)::numeric / (SELECT COUNT(*) FROM public.fixtures WHERE fixture_year = fw.fixture_year) as coverage_pct
+FROM public.fixture_weather fw
+WHERE fixture_year BETWEEN 2023 AND 2025
+GROUP BY fixture_year
+ORDER BY fixture_year DESC;
+
+-- Referees coverage (com nomes)
+SELECT 
+  fixture_year,
+  COUNT(*)::numeric / (SELECT COUNT(*) FROM public.fixtures WHERE fixture_year = fr.fixture_year) as coverage_pct,
+  COUNT(*) FILTER (WHERE referee_name IS NOT NULL)::numeric / COUNT(*) as named_pct
+FROM public.fixture_referees fr
+WHERE fixture_year BETWEEN 2023 AND 2025
+GROUP BY fixture_year
+ORDER BY fixture_year DESC;
+```
+
+Para alertas de cobertura baixa:
+```sql
+SELECT * FROM public.coverage_alerts WHERE status = 'under' ORDER BY created_at DESC LIMIT 10;
+```
+Se houver alertas, rode o backfill script relevante (ex.: node scripts/backfillEventsStats.js YEAR YEAR).
+
+
+#### ML Predictions (EPIC 5)
+
+Nova Edge Function `card-prediction-ml` para previsões de cartões via regressão linear.
+
+**Teste**:
+```bash
+curl -X POST https://fxydkmfvmpafbdyjuxqv.supabase.co/functions/v1/card-prediction-ml \
+  -H "Authorization: Bearer YOUR_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"fixtureId": 19362210}'
+```
+
+**Integração em Views**:
+- Adicione coluna em `v_fixtures_upcoming_v2_pred`: `ml_over_prob` via RPC chamando a função.
+- Cron diário: `SELECT * FROM cron.job WHERE jobname = 'daily-ml-predictions';` para refresh batch.
+
+**Validação**: Para fixture test, predicted_cards deve alinhar com historical avg ±0.5; over_prob >0.6 para high-risk games.

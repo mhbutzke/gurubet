@@ -16,7 +16,7 @@
 
 
 # Subtasks:
-## 1. Split cron histórico (leve/pesado) na janela BRT 01–08 [in-progress]
+## 1. Split cron histórico (leve/pesado) na janela BRT 01–08 [done]
 ### Dependencies: None
 ### Description: Criar dois cron jobs para enrichment missing: grupo leve (participants,scores,periods) e pesado (lineups,lineup_details,odds,weather)
 ### Details:
@@ -28,7 +28,7 @@
 ### Details:
 
 
-## 3. MV `mv_coverage_by_month_target` + snapshot diário [pending]
+## 3. MV `mv_coverage_by_month_target` + snapshot diário [done]
 ### Dependencies: None
 ### Description: Criar materialized view de cobertura por mês/target e cron diário para snapshot em tabela histórica.
 ### Details:

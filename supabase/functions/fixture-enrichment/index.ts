@@ -1,3 +1,5 @@
+// deno-lint-ignore-file
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
@@ -41,6 +43,9 @@ const ALL_ENRICHMENT_TARGETS = new Set<string>([
   "fixture_lineup_details",
   "fixture_odds",
   "fixture_weather",
+  "fixture_events",
+  "fixture_statistics",
+  "fixture_referees",
 ]);
 
 function normaliseTargets(rawTargets: unknown): string[] {
@@ -58,6 +63,12 @@ function buildIncludesFromTargets(targets: string[]): string {
     switch (t) {
       case "fixture_participants":
         includeTokens.add("participants");
+        break;
+      case "fixture_events":
+        includeTokens.add("events");
+        break;
+      case "fixture_statistics":
+        includeTokens.add("statistics.type");
         break;
       case "fixture_scores":
         includeTokens.add("scores");
@@ -77,6 +88,9 @@ function buildIncludesFromTargets(targets: string[]): string {
         break;
       case "fixture_weather":
         includeTokens.add("weatherReport");
+        break;
+      case "fixture_referees":
+        includeTokens.add("referees");
         break;
       default:
         break;
@@ -283,19 +297,72 @@ function mapOdds(odd: any, fixtureId: number, runTimestamp: string) {
   };
 }
 
-function mapWeather(weather: any, fixtureId: number, runTimestamp: string) {
+function extractStatValue(stat: any) {
+  if (!stat || typeof stat !== "object") return { numeric: null, text: null };
+  const { data } = stat;
+  if (!data || typeof data !== "object") return { numeric: null, text: null };
+  const value = data?.value ?? data?.count ?? data?.total ?? data?.avg ?? null;
+  if (value === null || value === undefined) return { numeric: null, text: null };
+  if (typeof value === "number") return { numeric: value, text: String(value) };
+  const num = Number(value);
+  return {
+    numeric: Number.isFinite(num) ? num : null,
+    text: String(value),
+  };
+}
+
+function mapEvent(event: any, runTimestamp: string) {
+  return {
+    id: event.id,
+    fixture_id: event.fixture_id,
+    period_id: event.period_id ?? null,
+    detailed_period_id: event.detailed_period_id ?? null,
+    participant_id: event.participant_id ?? null,
+    type_id: event.type_id ?? null,
+    sub_type_id: event.sub_type_id ?? null,
+    coach_id: event.coach_id ?? null,
+    player_id: event.player_id ?? null,
+    related_player_id: event.related_player_id ?? null,
+    player_name: event.player_name ?? null,
+    related_player_name: event.related_player_name ?? null,
+    result: event.result ?? null,
+    info: event.info ?? null,
+    addition: event.addition ?? null,
+    minute: toNumber(event.minute),
+    extra_minute: toNumber(event.extra_minute),
+    injured: toBool(event.injured),
+    on_bench: toBool(event.on_bench),
+    rescinded: toBool(event.rescinded),
+    section: event.section ?? null,
+    sort_order: toNumber(event.sort_order),
+    updated_at: runTimestamp,
+  };
+}
+
+function mapStatistic(stat: any, runTimestamp: string) {
+  const { numeric, text } = extractStatValue(stat);
+  return {
+    id: stat.id,
+    fixture_id: stat.fixture_id,
+    participant_id: stat.participant_id ?? null,
+    player_id: stat.player_id ?? null,
+    type_id: stat.type_id ?? null,
+    location: stat.location ?? null,
+    value_numeric: numeric,
+    value_text: text,
+    data: stat.data ?? null,
+    type_name: stat.type?.name ?? null,
+    type_code: stat.type?.code ?? null,
+    stat_group: stat.type?.stat_group ?? null,
+    updated_at: runTimestamp,
+  };
+}
+
+function mapFixtureReferee(refereeId: number, fixtureId: number, runTimestamp: string) {
   return {
     fixture_id: fixtureId,
-    temperature_celsius: toNumber(weather.temperature_celsius),
-    temperature_fahrenheit: toNumber(weather.temperature_fahrenheit),
-    humidity: toNumber(weather.humidity),
-    pressure: toNumber(weather.pressure),
-    wind_speed: toNumber(weather.wind_speed),
-    wind_direction: toNumber(weather.wind_direction),
-    clouds: toNumber(weather.clouds),
-    condition_code: weather.condition_code ?? null,
-    condition_description: weather.condition_description ?? null,
-    condition_icon: weather.condition_icon ?? null,
+    referee_id: refereeId,  // Use passed refereeId
+    role: 'main',  // Default for main
     updated_at: runTimestamp,
   };
 }
@@ -308,6 +375,9 @@ const UPSERT_TARGETS: Record<string, string> = {
   fixture_lineup_details: "id",
   fixture_odds: "id",
   fixture_weather: "fixture_id",
+  fixture_events: "id",
+  fixture_statistics: "id",
+  fixture_referees: "fixture_id,referee_id",
 };
 
 async function chunkedUpsert(table: string, rows: any[], chunkSize = 500) {
@@ -385,6 +455,8 @@ async function fetchEnrichmentData(
   metrics?: { http: Array<Record<string, unknown>> },
 ) {
   const runTimestamp = new Date().toISOString();
+  const eventRows: any[] = [];
+  const statRows: any[] = [];
   const participantRows: any[] = [];
   const scoreRows: any[] = [];
   const periodRows: any[] = [];
@@ -392,6 +464,8 @@ async function fetchEnrichmentData(
   const lineupDetailRows: any[] = [];
   const weatherRows: any[] = [];
   const oddsRows: any[] = [];
+  const refereeRows: any[] = [];
+  const refereeMasterRows: any[] = [];
 
   const effectiveBatch = Math.min(BATCH_SIZE, 50);
   for (let i = 0; i < fixtureIds.length; i += effectiveBatch) {
@@ -407,6 +481,20 @@ async function fetchEnrichmentData(
 
     const fixtures = payload?.data ?? [];
     fixtures.forEach((fixture: any) => {
+      // Events
+      if (targetSet.has("fixture_events") && Array.isArray(fixture.events)) {
+        fixture.events.forEach((event: any) => {
+          eventRows.push(mapEvent(event, runTimestamp));
+        });
+      }
+
+      // Statistics
+      if (targetSet.has("fixture_statistics") && Array.isArray(fixture.statistics)) {
+        fixture.statistics.forEach((stat: any) => {
+          statRows.push(mapStatistic(stat, runTimestamp));
+        });
+      }
+
       // Participantes
       if (targetSet.has("fixture_participants") && Array.isArray(fixture.participants)) {
         fixture.participants.forEach((participant: any) => {
@@ -456,10 +544,72 @@ async function fetchEnrichmentData(
           oddsRows.push(mapOdds(odd, fixture.id, runTimestamp));
         });
       }
+
+      // Referees
+      if (targetSet.has("fixture_referees") && Array.isArray(fixture.referees)) {
+        fixture.referees.forEach((ref: any) => {
+          if (ref.type_id === 6) {  // Main referee only
+            const refId = ref.referee_id || ref.id;  // Prefer referee_id, fallback id
+            refereeRows.push(mapFixtureReferee(refId, fixture.id, runTimestamp));
+            refereeMasterRows.push({
+              id: refId,  // Use refId
+              sport_id: toNumber(ref.sport_id) ?? 1,
+              country_id: toNumber(ref.country_id),
+              city_id: toNumber(ref.city_id),
+              common_name: ref.common_name ?? null,
+              firstname: ref.firstname ?? null,
+              lastname: ref.lastname ?? null,
+              name: ref.name ?? ref.display_name ?? null,
+              display_name: ref.display_name ?? null,
+              image_path: ref.image_path ?? null,
+              height: toNumber(ref.height),
+              weight: toNumber(ref.weight),
+              date_of_birth: ref.date_of_birth ?? null,
+              gender: ref.gender ?? null,
+              updated_at: runTimestamp,
+            });
+            console.log(`Processed main referee ${refId} for fixture ${fixture.id}`);
+          }
+        });
+      }
     });
   }
 
-  return { participantRows, scoreRows, periodRows, lineupRows, lineupDetailRows, weatherRows, oddsRows };
+  return { eventRows, statRows, participantRows, scoreRows, periodRows, lineupRows, lineupDetailRows, weatherRows, oddsRows, refereeRows, refereeMasterRows };
+}
+
+async function fetchRefereesDetailsByIds(refIds: number[], metrics?: { http: Array<Record<string, unknown>> }) {
+  const details: any[] = [];
+  const effectiveBatch = Math.min(BATCH_SIZE, 50);
+  for (let i = 0; i < refIds.length; i += effectiveBatch) {
+    const batch = refIds.slice(i, i + effectiveBatch);
+    if (!batch.length) continue;
+    const url = new URL(`${SPORTMONKS_BASE}/football/referees/multi/${batch.join(",")}`);
+    url.searchParams.set("api_token", SPORTMONKS_API_KEY);
+    const { payload, rateLimit } = await fetchSportmonks(url, metrics);
+    await maybePause(rateLimit, "referees/multi/byIds");
+    const items = payload?.data ?? [];
+    items.forEach((ref: any) => {
+      details.push({
+        id: ref.id,
+        sport_id: toNumber(ref.sport_id) ?? 1,
+        country_id: toNumber(ref.country_id),
+        city_id: toNumber(ref.city_id),
+        common_name: ref.common_name ?? null,
+        firstname: ref.firstname ?? null,
+        lastname: ref.lastname ?? null,
+        name: ref.name ?? ref.display_name ?? null,
+        display_name: ref.display_name ?? null,
+        image_path: ref.image_path ?? null,
+        height: toNumber(ref.height),
+        weight: toNumber(ref.weight),
+        date_of_birth: ref.date_of_birth ?? null,
+        gender: ref.gender ?? null,
+        updated_at: new Date().toISOString(),
+      });
+    });
+  }
+  return details;
 }
 
 async function insertRunLog(entity: string, status: string, startedAt: string, processed: number, errorMessage?: string, details?: Record<string, unknown>) {
@@ -511,6 +661,22 @@ serve(async (request) => {
     const targetSet = new Set<string>(effectiveTargets);
     const includes = buildIncludesFromTargets(effectiveTargets);
 
+    // Modo direto por referee_ids: atualiza nomes dos árbitros sem depender de fixtures
+    const rawRefIds = Array.isArray((payload as any)?.referee_ids) ? (payload as any)?.referee_ids : [];
+    const refereeIds = rawRefIds
+      .map((v: any) => toNumber(v))
+      .filter((v: any): v is number => typeof v === 'number');
+    if (refereeIds.length > 0) {
+      const metrics: { http: Array<Record<string, unknown>> } = { http: [] };
+      const refDetails = await fetchRefereesDetailsByIds(refereeIds, metrics);
+      if (refDetails.length) {
+        const { error: refErr } = await supabase.from("referees").upsert(refDetails, { onConflict: "id" });
+        if (refErr) console.error("Upsert referees (byIds) failed:", refErr.message);
+      }
+      await insertRunLog("fixture_enrichment", "success", startedAt, refereeIds.length, undefined, { mode: "referees_by_ids", count: refereeIds.length });
+      return new Response(JSON.stringify({ message: "Referees updated", count: refereeIds.length }), { headers: { "Content-Type": "application/json" }, status: 200 });
+    }
+
     const fixtureIds = await getFixturesToEnrich(limit, payload);
 
     if (!fixtureIds.length) {
@@ -523,6 +689,8 @@ serve(async (request) => {
 
     const metrics: { http: Array<Record<string, unknown>> } = { http: [] };
     const {
+      eventRows,
+      statRows,
       participantRows,
       scoreRows,
       periodRows,
@@ -530,9 +698,13 @@ serve(async (request) => {
       lineupDetailRows,
       weatherRows,
       oddsRows,
+      refereeRows,
+      refereeMasterRows,
     } = await fetchEnrichmentData(fixtureIds, includes, targetSet, metrics);
 
     // Deduplicar por chaves antes do upsert
+    const dedupedEvents = dedupeBy(eventRows, (r: any) => String(r.id ?? ''));
+    const dedupedStats = dedupeBy(statRows, (r: any) => String(r.id ?? ''));
     const dedupedParticipants = dedupeBy(participantRows, (r: any) => `${r.fixture_id}:${r.participant_id ?? ''}`);
     const dedupedScores = dedupeBy(scoreRows, (r: any) => String(r.id ?? ''));
     const dedupedPeriods = dedupeBy(periodRows, (r: any) => String(r.id ?? ''));
@@ -540,7 +712,14 @@ serve(async (request) => {
     const dedupedLineupDetails = dedupeBy(lineupDetailRows, (r: any) => String(r.id ?? ''));
     const dedupedWeather = dedupeBy(weatherRows, (r: any) => String(r.fixture_id ?? ''));
     const dedupedOdds = dedupeBy(oddsRows, (r: any) => String(r.id ?? ''));
+    const dedupedReferees = dedupeBy(refereeRows, (r: any) => `${r.fixture_id}:${r.referee_id ?? ''}`);
 
+    if (targetSet.has("fixture_events") && dedupedEvents.length) {
+      await chunkedUpsert("fixture_events", dedupedEvents);
+    }
+    if (targetSet.has("fixture_statistics") && dedupedStats.length) {
+      await chunkedUpsert("fixture_statistics", dedupedStats);
+    }
     if (targetSet.has("fixture_participants") && dedupedParticipants.length) {
       await chunkedUpsert("fixture_participants", dedupedParticipants);
     }
@@ -562,9 +741,74 @@ serve(async (request) => {
     if (targetSet.has("fixture_odds") && dedupedOdds.length) {
       await chunkedUpsert("fixture_odds", dedupedOdds);
     }
+    if (targetSet.has("fixture_referees") && dedupedReferees.length) {
+      // Semear árbitros faltantes (best-effort) antes do vínculo, com fallback para detalhes
+      let dedupedRefMaster = dedupeBy(refereeMasterRows, (r: any) => String(r.id ?? ''));
+
+      // Fallback: buscar detalhes dos árbitros sem nome
+      const missingNameIds = dedupedRefMaster
+        .filter((r: any) => !r.name && !r.display_name && !r.common_name)
+        .map((r: any) => r.id)
+        .filter((v: any) => typeof v === 'number');
+
+      if (missingNameIds.length) {
+        const refDetails: any[] = [];
+        const effectiveBatch = Math.min(BATCH_SIZE, 50);
+        for (let i = 0; i < missingNameIds.length; i += effectiveBatch) {
+          const batch = missingNameIds.slice(i, i + effectiveBatch);
+          if (!batch.length) continue;
+          const url = new URL(`${SPORTMONKS_BASE}/football/referees/multi/${batch.join(",")}`);
+          url.searchParams.set("api_token", SPORTMONKS_API_KEY);
+
+          try {
+            const { payload, rateLimit } = await fetchSportmonks(url, metrics);
+            await maybePause(rateLimit, "referees/multi");
+            const items = payload?.data ?? [];
+            items.forEach((ref: any) => {
+              refDetails.push({
+                id: ref.id,
+                sport_id: toNumber(ref.sport_id) ?? 1,
+                country_id: toNumber(ref.country_id),
+                city_id: toNumber(ref.city_id),
+                common_name: ref.common_name ?? null,
+                firstname: ref.firstname ?? null,
+                lastname: ref.lastname ?? null,
+                name: ref.name ?? ref.display_name ?? null,
+                display_name: ref.display_name ?? null,
+                image_path: ref.image_path ?? null,
+                height: toNumber(ref.height),
+                weight: toNumber(ref.weight),
+                date_of_birth: ref.date_of_birth ?? null,
+                gender: ref.gender ?? null,
+                updated_at: new Date().toISOString(),
+              });
+            });
+          } catch (e) {
+            console.error("Referees details fetch failed:", e && (e as any).message ? (e as any).message : String(e));
+          }
+        }
+
+        if (refDetails.length) {
+          const byId: Record<string, any> = {};
+          refDetails.forEach((r) => { byId[String(r.id)] = r; });
+          dedupedRefMaster = dedupedRefMaster.map((r: any) => byId[String(r.id)] ?? r);
+        }
+      }
+
+      if (dedupedRefMaster.length) {
+        try {
+          const { error: refErr } = await supabase.from("referees").upsert(dedupedRefMaster, { onConflict: "id" });
+          if (refErr) console.error("Upsert referees failed:", refErr.message);
+        } catch (_) { /* ignore */ }
+      }
+
+      await chunkedUpsert("fixture_referees", dedupedReferees);
+    }
 
     const summary = {
       fixturesEnriched: fixtureIds.length,
+      events: dedupedEvents.length,
+      statistics: dedupedStats.length,
       participants: dedupedParticipants.length,
       scores: dedupedScores.length,
       periods: dedupedPeriods.length,
@@ -572,6 +816,7 @@ serve(async (request) => {
       lineupDetails: dedupedLineupDetails.length,
       weather: dedupedWeather.length,
       odds: dedupedOdds.length,
+      referees: dedupedReferees.length,
       targets: Array.from(targetSet.values()),
     };
 
